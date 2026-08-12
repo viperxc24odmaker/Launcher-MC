@@ -62,8 +62,7 @@
   // ---- instance management ----
   let newInstanceName = '';
   let newInstanceVersion = '';
-  let newInstanceLoader: 'vanilla'|'fabric' = 'vanilla';
-  const comingSoonLoaders = ['forge','neoforge','quilt'];
+  let newInstanceLoader: 'vanilla'|'fabric'|'forge'|'neoforge' = 'vanilla';
 
   type McVersion = { id:string; kind:string; release_time:string };
   let mcVersions: McVersion[] = [];
@@ -355,7 +354,7 @@
             <div class="card-body"><div><b>{inst.name}</b><small>{inst.version} · {inst.kind}</small></div><span class="state">READY</span></div>
           </button>
         {/each}
-        <button class="new-card" onclick={()=>page='Instances'}><div><Plus size={24}/></div><b>Create instance</b><small>Vanilla · Fabric · Forge</small></button>
+        <button class="new-card" onclick={()=>page='Instances'}><div><Plus size={24}/></div><b>Create instance</b><small>Vanilla · Fabric · Forge · NeoForge</small></button>
       </section>
 
       <section class="section-head lower"><div><span class="eyebrow">BUILT IN</span><h2>Power without the clutter</h2></div></section>
@@ -377,7 +376,8 @@
             <select class="select-input" bind:value={newInstanceLoader}>
               <option value="vanilla">Vanilla</option>
               <option value="fabric">Fabric</option>
-              {#each comingSoonLoaders as l}<option value={l} disabled>{l.charAt(0).toUpperCase()+l.slice(1)} (soon)</option>{/each}
+              <option value="forge">Forge</option>
+              <option value="neoforge">NeoForge</option>
             </select>
             <label class="snapshot-toggle"><input type="checkbox" bind:checked={includeSnapshots} onchange={loadMcVersions}/> Show snapshots</label>
             <button class="row-action solid" onclick={createInstance}><Plus size={14}/> CREATE</button>

@@ -103,7 +103,7 @@ fn neoforge_prefix(mc: &str) -> String {
     let major = p.next().unwrap_or("");
     let minor = p.next().unwrap_or("");
     let patch = p.next();
-    match patch { Some(patch) => format!("{}.{}", major.trim_start_matches('1'), patch), None => format!("{}.{minor}", major.trim_start_matches('1')) }
+    match patch { Some(patch) => format!("{}.{}", major.trim_start_matches('1'), patch), None => format!("{}.0", major.trim_start_matches('1')) }
 }
 async fn neoforge_version(client: &reqwest::Client, mc: &str, requested: Option<&str>) -> Result<String, String> {
     if let Some(v) = requested.filter(|v| !v.trim().is_empty()) { return Ok(v.to_string()); }
@@ -161,26 +161,30 @@ async fn version_meta(client: &reqwest::Client, manifest: &Value, id: &str) -> R
 }
 
 async fn resolve_inherits(client: &reqwest::Client, manifest: &Value, mut meta: Value) -> Result<Value, String> {
-    if let Some(parent_id) = meta.get("inheritsFrom").and_then(Value::as_str).map(str::to_string) {
-        let parent = version_meta(client, manifest, &parent_id).await?;
-        let mut merged = resolve_inherits(client, manifest, parent).await?;
-        for key in ["id","mainClass","type","releaseTime","time","assetIndex","javaVersion"] { if let Some(v)=meta.get(key) { merged[key]=v.clone(); } }
-        for key in ["libraries"] {
-            let mut arr = merged.get(key).and_then(Value::as_array).cloned().unwrap_or_default();
-            if let Some(child) = meta.get(key).and_then(Value::as_array) { arr.extend(child.iter().cloned()); }
-            merged[key]=Value::Array(arr);
-        }
-        if let Some(args) = meta.get("arguments") {
-            let mut merged_args = merged.get("arguments").cloned().unwrap_or_else(|| json!({}));
+    let mut chain = Vec::new();
+    loop {
+        let parent = meta.get("inheritsFrom").and_then(Value::as_str).map(str::to_string);
+        chain.push(meta);
+        let Some(parent_id) = parent else { break; };
+        meta = version_meta(client, manifest, &parent_id).await?;
+    }
+    let mut merged = chain.pop().unwrap_or_else(|| json!({}));
+    while let Some(child) = chain.pop() {
+        for key in ["id","mainClass","type","releaseTime","time","assetIndex","javaVersion"] { if let Some(v)=child.get(key) { merged[key]=v.clone(); } }
+        let mut libs = merged.get("libraries").and_then(Value::as_array).cloned().unwrap_or_default();
+        if let Some(extra) = child.get("libraries").and_then(Value::as_array) { libs.extend(extra.iter().cloned()); }
+        if !libs.is_empty() { merged["libraries"]=Value::Array(libs); }
+        let mut merged_args = merged.get("arguments").cloned().unwrap_or_else(|| json!({}));
+        if let Some(args) = child.get("arguments") {
             for kind in ["jvm","game"] {
                 let mut arr = merged_args.get(kind).and_then(Value::as_array).cloned().unwrap_or_default();
-                if let Some(child) = args.get(kind).and_then(Value::as_array) { arr.extend(child.iter().cloned()); }
+                if let Some(extra) = args.get(kind).and_then(Value::as_array) { arr.extend(extra.iter().cloned()); }
                 if !arr.is_empty() { merged_args[kind]=Value::Array(arr); }
             }
             merged["arguments"]=merged_args;
         }
-        Ok(merged)
-    } else { Ok(meta) }
+    }
+    Ok(merged)
 }
 
 async fn download_libraries_and_natives(client: &reqwest::Client, meta: &Value, game_dir: &Path, natives_dir: &Path, classpath: &mut Vec<String>, app: &tauri::AppHandle, instance: &str) -> Result<(), String> {
