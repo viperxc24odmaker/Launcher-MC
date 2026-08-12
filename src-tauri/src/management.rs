@@ -35,7 +35,14 @@ pub fn list_instances(app: tauri::AppHandle) -> Result<Vec<InstanceSummary>, Str
         if !entry.file_type().map_err(|e| e.to_string())?.is_dir() { continue; }
         let path = entry.path();
         let (version, loader, loader_version) = read_profile(&path);
-        result.push(InstanceSummary { name: entry.file_name().to_string_lossy().to_string(), path: path.to_string_lossy().to_string(), has_game: path.join("game").exists(), version, loader, loader_version });
+        result.push(InstanceSummary { 
+            name: entry.file_name().to_string_lossy().to_string(), 
+            path: path.to_string_lossy().to_string(), 
+            has_game: path.join("game").exists(), 
+            version, 
+            loader, 
+            loader_version
+        });
     }
     result.sort_by(|a,b| a.name.cmp(&b.name));
     Ok(result)
@@ -52,8 +59,23 @@ pub fn create_instance(app: tauri::AppHandle, name: String, version: String, loa
     fs::create_dir_all(path.join("mods")).map_err(|e| e.to_string())?;
     fs::create_dir_all(path.join("resourcepacks")).map_err(|e| e.to_string())?;
     fs::create_dir_all(path.join("saves")).map_err(|e| e.to_string())?;
-    fs::write(path.join("profile.json"), serde_json::to_vec_pretty(&json!({"name": name, "minecraft": version, "loader": loader, "loader_version": loader_version, "ram_mb": 4096, "jvm_args": []})).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-    Ok(InstanceSummary { name: safe(&name), path: path.to_string_lossy().to_string(), has_game: true, version, loader, loader_version })
+    let profile_data = json!({
+        "name": name,
+        "minecraft": version,
+        "loader": loader,
+        "loader_version": loader_version,
+        "ram_mb": 4096,
+        "jvm_args": []
+    });
+    fs::write(path.join("profile.json"), serde_json::to_vec_pretty(&profile_data).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    Ok(InstanceSummary { 
+        name: safe(&name), 
+        path: path.to_string_lossy().to_string(), 
+        has_game: true, 
+        version, 
+        loader, 
+        loader_version 
+    })
 }
 
 #[tauri::command]
@@ -132,11 +154,23 @@ pub fn remove_resource_pack(app: tauri::AppHandle, instance: String, filename: S
 #[tauri::command]
 pub fn analyze_crash(log: String) -> Result<String, String> {
     let lower = log.to_lowercase();
-    let diagnosis = if lower.contains("outofmemoryerror") || lower.contains("java heap space") { "Java ran out of heap memory. Increase the instance RAM or remove heavy mods." }
-    else if lower.contains("nosuchmethoderror") || lower.contains("noclassdeffounderror") { "A mod/library mismatch is likely. Check the mod loader and dependency versions." }
-    else if lower.contains("invalidsession") || lower.contains("authentication") { "Minecraft authentication failed. Sign in again or use the offline fallback for single-player." }
-    else if lower.contains("unsupportedclassversion") { "The selected Java runtime is incompatible with this Minecraft version. Minecraft 1.21.x requires Java 21." }
-    else if lower.contains("mixin") { "A mixin failed during mod initialization. Check the first mod named above the Mixin failure and its dependencies." }
-    else { "No single failure signature was detected. Open the full latest.log and inspect the first ERROR/Exception before the crash cascade." };
+    let diagnosis = if lower.contains("outofmemoryerror") || lower.contains("java heap space") { 
+        "Java ran out of heap memory. Increase the instance RAM or remove heavy mods." 
+    }
+    else if lower.contains("nosuchmethoderror") || lower.contains("noclassdeffounderror") { 
+        "A mod/library mismatch is likely. Check the mod loader and dependency versions." 
+    }
+    else if lower.contains("invalidsession") || lower.contains("authentication") { 
+        "Minecraft authentication failed. Sign in again or use the offline fallback for single-player." 
+    }
+    else if lower.contains("unsupportedclassversion") { 
+        "The selected Java runtime is incompatible with this Minecraft version. Minecraft 1.21.x requires Java 21." 
+    }
+    else if lower.contains("mixin") { 
+        "A mixin failed during mod initialization. Check the first mod named above the Mixin failure and its dependencies." 
+    }
+    else { 
+        "No single failure signature was detected. Open the full latest.log and inspect the first ERROR/Exception before the crash cascade." 
+    };
     Ok(diagnosis.to_string())
 }
