@@ -1,0 +1,38 @@
+name: Fix launcher syntax
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  fix:
+    if: github.actor == 'viperxc24odmaker'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fix malformed offline account tuple
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src-tauri/src/lib.rs')
+          s = p.read_text()
+          old = '_=>{\"Steve\".to_string(),offline_uuid(\"Steve\"),\"\".to_string(),\"legacy\".to_string()}};'
+          new = '_=>(\"Steve\".to_string(),offline_uuid(\"Steve\"),\"\".to_string(),\"legacy\".to_string())};'
+          if old not in s:
+              raise SystemExit('Malformed tuple pattern not found; refusing to change unrelated code')
+          p.write_text(s.replace(old, new, 1))
+          PY
+      - name: Verify Rust syntax
+        working-directory: src-tauri
+        run: cargo check --lib
+      - name: Commit fix and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src-tauri/src/lib.rs
+          git rm .github/workflows/fix-launcher-syntax.yml
+          git commit -m 'fix: repair launcher account tuple syntax'
+          git push
