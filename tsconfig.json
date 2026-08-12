@@ -12,5 +12,5 @@
     "strict": true,
     "skipLibCheck": true
   },
-  "extends": "./.svelte-kit/tsconfig.json"
+  "include": ["src/**/*.ts", "src/**/*.svelte"]
 }
