@@ -1,9 +1,10 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
+  import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
-  import { Home, Layers3, Package, Image, Globe2, Server, Users, Settings, Sun, Moon, Play, Plus, Download, Bell, ChevronDown, Search, Cpu, ShieldCheck, Activity, Database, RotateCcw, Sparkles, Zap, AlertTriangle, Cloud, Check, X, Trash2, FolderOpen, Wand2, Shirt, UserPlus, LogIn, Upload, Star, KeyRound } from 'lucide-svelte';
+  import { Home, Layers3, Package, Image, Users, Settings, Sun, Moon, Play, Plus, Download, Bell, ChevronDown, Search, Cpu, ShieldCheck, Activity, Database, RotateCcw, Sparkles, Zap, AlertTriangle, Cloud, Check, X, Trash2, FolderOpen, Wand2, Shirt, UserPlus, LogIn, Upload, Star, KeyRound } from 'lucide-svelte';
 
-  type Page = 'Home' | 'Instances' | 'Mods' | 'Cosmetics' | 'Resource Packs' | 'Worlds' | 'Servers' | 'Accounts' | 'Settings';
+  type Page = 'Home' | 'Instances' | 'Mods' | 'Cosmetics' | 'Resource Packs' | 'Accounts' | 'Settings';
   let page: Page = 'Home';
   let dark = true;
   let selected = 'Vanilla 1.21.11';
@@ -14,12 +15,24 @@
   let query = '';
   let dropdownOpen = false;
 
-  const nav = [['Home',Home],['Instances',Layers3],['Mods',Package],['Cosmetics',Shirt],['Resource Packs',Image],['Worlds',Globe2],['Servers',Server],['Accounts',Users],['Settings',Settings]] as const;
-  let instances = [
-    {name:'Vanilla 1.21.11',version:'1.21.11',loader:'Vanilla',kind:'Survival',accent:'grass'},
-    {name:'Fabric Lab',version:'1.21.11',loader:'Fabric',kind:'Modded',accent:'sunset'},
-    {name:'Performance',version:'1.21.10',loader:'Fabric',kind:'Sodium + Vulkan',accent:'sky'}
-  ];
+  const nav = [['Home',Home],['Instances',Layers3],['Mods',Package],['Cosmetics',Shirt],['Resource Packs',Image],['Accounts',Users],['Settings',Settings]] as const;
+  type BackendInstance = { name:string; path:string; has_game:boolean; version:string; loader:string; loader_version?:string|null };
+  type UiInstance = { name:string; version:string; loader:string; kind:string; accent:string };
+  let instances: UiInstance[] = [];
+  let instancesLoaded = false;
+  const accentCycle = ['grass','sunset','sky'];
+  function toUiInstance(b: BackendInstance, idx: number): UiInstance {
+    const loaderDisplay = b.loader.charAt(0).toUpperCase() + b.loader.slice(1);
+    return { name: b.name, version: b.version, loader: loaderDisplay, kind: b.loader==='vanilla' ? 'Survival' : 'Modded', accent: accentCycle[idx % accentCycle.length] };
+  }
+  async function loadInstances(){
+    try{
+      const raw: BackendInstance[] = await invoke('list_instances');
+      instances = raw.map(toUiInstance);
+      instancesLoaded = true;
+      if(instances.length && !instances.find(i=>i.name===selected)){ selected = instances[0].name; }
+    }catch(e){ notify(`Error: ${String(e)}`,'error'); }
+  }
   const features = [
     ['Multi-instance isolation','Every profile gets its own files, mods, saves and runtime.',Layers3],
     ['Smart dependency resolution','Resolve mod dependencies before you press Play.',Package],
@@ -48,20 +61,37 @@
 
   // ---- instance management ----
   let newInstanceName = '';
+  let newInstanceVersion = '';
+  let newInstanceLoader: 'vanilla'|'fabric' = 'vanilla';
+  const comingSoonLoaders = ['forge','neoforge','quilt'];
+
+  type McVersion = { id:string; kind:string; release_time:string };
+  let mcVersions: McVersion[] = [];
+  let mcVersionsLoaded = false;
+  let includeSnapshots = false;
+  async function loadMcVersions(){
+    try{
+      mcVersions = await invoke('list_mc_versions', {includeSnapshots});
+      mcVersionsLoaded = true;
+      if(!newInstanceVersion && mcVersions.length){ newInstanceVersion = mcVersions[0].id; }
+    }catch(e){ notify(`Error: ${String(e)}`,'error'); }
+  }
+
   async function createInstance(){
     if(!newInstanceName.trim()){ notify('Give the instance a name first','error'); return; }
+    if(!newInstanceVersion){ notify('Pick a Minecraft version first','error'); return; }
     try{
-      await invoke('create_instance',{name:newInstanceName, version:'1.21.11'});
-      instances = [...instances, {name:newInstanceName, version:'1.21.11', loader:'Vanilla', kind:'Survival', accent:'grass'}];
+      await invoke('create_instance',{name:newInstanceName, version:newInstanceVersion, loader:newInstanceLoader, loaderVersion:null});
       notify(`Instance "${newInstanceName}" created`,'success');
       newInstanceName='';
+      await loadInstances();
     }catch(e){ notify(`Error: ${String(e)}`,'error'); }
   }
   async function deleteInstance(name:string){
     try{
       await invoke('delete_instance',{name});
-      instances = instances.filter(i=>i.name!==name);
       notify(`Deleted "${name}"`,'success');
+      await loadInstances();
     }catch(e){ notify(`Error: ${String(e)}`,'error'); }
   }
   async function openFolder(name:string){
@@ -81,13 +111,13 @@
   async function searchMods(){
     modLoading = true;
     try{
-      modResults = await invoke('search_mods',{query:modQuery, loader:instances.find(i=>i.name===selected)?.loader?.toLowerCase()||'fabric', version:'1.21.11'});
+      modResults = await invoke('search_mods',{query:modQuery, loader:instances.find(i=>i.name===selected)?.loader?.toLowerCase()||'fabric', version:instances.find(i=>i.name===selected)?.version||'1.21.11'});
     }catch(e){ notify(`Search failed: ${String(e)}`,'error'); modResults=[]; }
     finally{ modLoading=false; }
   }
   async function installMod(projectId:string){
     try{
-      const result = await invoke('install_mod',{instance:selected, projectId, gameVersion:'1.21.11', loader:instances.find(i=>i.name===selected)?.loader?.toLowerCase()||'fabric'});
+      const result = await invoke('install_mod',{instance:selected, projectId, gameVersion:instances.find(i=>i.name===selected)?.version||'1.21.11', loader:instances.find(i=>i.name===selected)?.loader?.toLowerCase()||'fabric'});
       notify(String(result),'success');
     }catch(e){ notify(`Install failed: ${String(e)}`,'error'); }
   }
@@ -231,7 +261,34 @@
   $: if(page==='Accounts' && !accountsLoaded){ loadAccounts(); loadMsSettings(); }
   $: if(activeAccount && skinCanvasEl){ drawActiveSkin(); }
 
-  onMount(() => { loadAccounts(); });
+  // ---- resource packs ----
+  let resourcePacksList: string[] = [];
+  let rpImportPath = '';
+  async function loadResourcePacks(){
+    try{ resourcePacksList = await invoke('list_resource_packs', {instance:selected}); }
+    catch(e){ notify(`Error: ${String(e)}`,'error'); }
+  }
+  async function importResourcePackFn(){
+    if(!rpImportPath.trim()){ notify('Paste the full path to a .zip resource pack','error'); return; }
+    try{ await invoke('import_resource_pack',{instance:selected, filePath:rpImportPath}); notify('Resource pack imported','success'); rpImportPath=''; await loadResourcePacks(); }
+    catch(e){ notify(`Error: ${String(e)}`,'error'); }
+  }
+  async function removeResourcePackFn(filename:string){
+    try{ await invoke('remove_resource_pack',{instance:selected, filename}); notify('Removed','success'); await loadResourcePacks(); }
+    catch(e){ notify(`Error: ${String(e)}`,'error'); }
+  }
+  $: if(page==='Resource Packs' && selected){ loadResourcePacks(); }
+
+  onMount(() => {
+    loadAccounts();
+    loadInstances();
+    loadMcVersions();
+    let unlistenFn: (() => void) | undefined;
+    listen<{instance:string; stage:string; detail:string}>('launch-progress', (e) => {
+      status = e.payload.detail;
+    }).then(f => { unlistenFn = f; });
+    return () => { unlistenFn?.(); };
+  });
   $: if(page==='Mods' && modResults.length===0 && !modLoading) { /* lazy, user triggers search */ }
   $: if(page==='Cosmetics' && cosmeticsList.length===0) { loadCosmetics(); }
 </script>
@@ -310,11 +367,22 @@
       </section>
       <div class="management-grid">
         <div class="panel wide">
-          <div class="panel-head">
-            <div><b>Create new instance</b><small>Spins up isolated game, mods, saves and runtime folders.</small></div>
+          <div class="panel-title">Create new instance</div>
+          <div class="create-instance-form">
             <label class="search inner"><input placeholder="Instance name…" bind:value={newInstanceName}/></label>
+            <select class="select-input" bind:value={newInstanceVersion}>
+              {#if !mcVersionsLoaded}<option value="">Loading versions…</option>{/if}
+              {#each mcVersions as v}<option value={v.id}>{v.id}{v.kind!=='release'?` (${v.kind})`:''}</option>{/each}
+            </select>
+            <select class="select-input" bind:value={newInstanceLoader}>
+              <option value="vanilla">Vanilla</option>
+              <option value="fabric">Fabric</option>
+              {#each comingSoonLoaders as l}<option value={l} disabled>{l.charAt(0).toUpperCase()+l.slice(1)} (soon)</option>{/each}
+            </select>
+            <label class="snapshot-toggle"><input type="checkbox" bind:checked={includeSnapshots} onchange={loadMcVersions}/> Show snapshots</label>
             <button class="row-action solid" onclick={createInstance}><Plus size={14}/> CREATE</button>
           </div>
+          <div class="panel-title" style="margin-top:20px">Your instances</div>
           <div class="rows">
             {#each instances as inst}
               <div class="row">
@@ -327,6 +395,7 @@
                 <button class="row-action" onclick={()=>choose(inst.name)}>OPEN</button>
               </div>
             {/each}
+            {#if instancesLoaded && instances.length===0}<div class="empty-state"><Layers3 size={28}/><p>No instances yet - create one above to get started</p></div>{/if}
           </div>
         </div>
         <div class="panel">
@@ -485,13 +554,25 @@
 
     {:else}
       <section class="page-head">
-        <div><span class="eyebrow">{page.toUpperCase()}</span><h1>{page}</h1><p>Manage your Minecraft workspace from one place.</p></div>
-        <button class="play compact" onclick={()=>notify('Coming in a future update')}><Plus size={17}/> NEW</button>
+        <div><span class="eyebrow">RESOURCE PACKS</span><h1>Resource Packs</h1><p>Applied to <b>{selected}</b>. Drop in .zip packs and they show here.</p></div>
       </section>
       <div class="management-grid">
         <div class="panel wide">
-          <div class="panel-head"><div><b>{page} manager</b><small>Search, filter and control every part of your workspace.</small></div><label class="search inner"><Search size={15}/><input placeholder="Filter…" bind:value={query}/></label></div>
-          <div class="empty-state"><Package size={28}/><p>{page} management is on the roadmap</p></div>
+          <div class="panel-head">
+            <div><b>Import a pack</b><small>Paste the full path to a .zip resource pack file.</small></div>
+            <label class="search inner wide"><input placeholder="Full path to .zip…" bind:value={rpImportPath}/></label>
+            <button class="row-action solid" onclick={importResourcePackFn}><Upload size={13}/> IMPORT</button>
+          </div>
+          <div class="rows">
+            {#each resourcePacksList as pack}
+              <div class="row">
+                <div class="row-icon"><Image size={17}/></div>
+                <div class="row-main"><b>{pack}</b><span>Applied to {selected}</span></div>
+                <button class="row-action danger" onclick={()=>removeResourcePackFn(pack)}><Trash2 size={13}/></button>
+              </div>
+            {/each}
+            {#if resourcePacksList.length===0}<div class="empty-state"><Image size={28}/><p>No resource packs yet for {selected}</p></div>{/if}
+          </div>
         </div>
         <div class="panel">
           <div class="panel-title">System health</div>

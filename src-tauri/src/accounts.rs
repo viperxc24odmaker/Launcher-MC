@@ -80,7 +80,7 @@ pub fn add_offline_account(app: tauri::AppHandle, username: String) -> Result<Ac
 #[tauri::command]
 pub async fn add_elyby_account(app: tauri::AppHandle, username: String, password: String) -> Result<Account, String> {
     if username.trim().is_empty() || password.is_empty() { return Err("Enter your ely.by username/email and password".into()); }
-    let client = reqwest::Client::builder().user_agent("BlockPilot/0.1.0").build().map_err(|e| e.to_string())?;
+    let client = reqwest::Client::builder().user_agent("BlockPilot/0.1.0").connect_timeout(std::time::Duration::from_secs(10)).timeout(std::time::Duration::from_secs(30)).build().map_err(|e| e.to_string())?;
     let payload = json!({
         "username": username,
         "password": password,

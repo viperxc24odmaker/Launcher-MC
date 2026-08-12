@@ -127,7 +127,7 @@ pub async fn start_microsoft_login(app: tauri::AppHandle) -> Result<Account, Str
     // blocking loopback wait happens off the async executor's cooperative point, acceptable for a one-shot user-driven sign-in
     let code = await_redirect_code(&state)?;
 
-    let client = reqwest::Client::builder().user_agent("BlockPilot/0.1.0").build().map_err(|e| e.to_string())?;
+    let client = reqwest::Client::builder().user_agent("BlockPilot/0.1.0").connect_timeout(std::time::Duration::from_secs(10)).timeout(std::time::Duration::from_secs(30)).build().map_err(|e| e.to_string())?;
 
     // 1) MSA token exchange
     let token_resp: Value = client.post(TOKEN_URL).form(&[

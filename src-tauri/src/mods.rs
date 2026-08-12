@@ -8,7 +8,7 @@ pub struct ModResult { pub project_id: String, pub title: String, pub descriptio
 
 #[tauri::command]
 pub async fn search_mods(query: String, loader: Option<String>, version: Option<String>) -> Result<Vec<ModResult>, String> {
-    let client = reqwest::Client::builder().user_agent("BlockPilot/0.1.0").build().map_err(|e| e.to_string())?;
+    let client = reqwest::Client::builder().user_agent("BlockPilot/0.1.0").connect_timeout(std::time::Duration::from_secs(10)).timeout(std::time::Duration::from_secs(30)).build().map_err(|e| e.to_string())?;
     let mut facets: Vec<Vec<String>> = vec![vec!["project_type:mod".into()]];
     if let Some(l) = &loader { if !l.is_empty() { facets.push(vec![format!("categories:{}", l.to_lowercase())]); } }
     if let Some(v) = &version { if !v.is_empty() { facets.push(vec![format!("versions:{}", v)]); } }
@@ -27,7 +27,7 @@ pub async fn search_mods(query: String, loader: Option<String>, version: Option<
 
 #[tauri::command]
 pub async fn install_mod(app: tauri::AppHandle, instance: String, project_id: String, game_version: String, loader: String) -> Result<String, String> {
-    let client = reqwest::Client::builder().user_agent("BlockPilot/0.1.0").build().map_err(|e| e.to_string())?;
+    let client = reqwest::Client::builder().user_agent("BlockPilot/0.1.0").connect_timeout(std::time::Duration::from_secs(10)).timeout(std::time::Duration::from_secs(30)).build().map_err(|e| e.to_string())?;
     let url = format!("https://api.modrinth.com/v2/project/{}/version?loaders=[\"{}\"]&game_versions=[\"{}\"]", project_id, loader, game_version);
     let versions: Value = client.get(&url).send().await.map_err(|e| e.to_string())?.error_for_status().map_err(|e| e.to_string())?.json().await.map_err(|e| e.to_string())?;
     let first = versions.as_array().and_then(|a| a.first()).ok_or("No compatible mod version found for this Minecraft/loader combo")?;
