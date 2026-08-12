@@ -1,20 +1,15 @@
 use serde_json::Value;
-use sha2::{Digest, Sha256};
+use sha1::{Digest as Sha1Digest, Sha1};
+use sha2::{Digest as Sha2Digest, Sha256};
 use std::{fs, path::{Path, PathBuf}, process::{Command, Stdio}};
 use tauri::Manager;
 
 const VERSION: &str = "1.21.11";
 const VERSION_MANIFEST: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 
-fn safe_name(value: &str) -> String {
-    value.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect()
-}
-
-fn sha256(bytes: &[u8]) -> String {
-    let mut h = Sha256::new();
-    h.update(bytes);
-    format!("{:x}", h.finalize())
-}
+fn safe_name(value: &str) -> String { value.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect() }
+fn sha1(bytes: &[u8]) -> String { let mut h = Sha1::new(); h.update(bytes); format!("{:x}", h.finalize()) }
+fn offline_uuid(username: &str) -> String { let mut h = Sha2::new(); h.update(username.as_bytes()); let hex = format!("{:x}", h.finalize()); format!("{}-{}-{}-{}-{}", &hex[0..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..32]) }
 
 async fn fetch_json(client: &reqwest::Client, url: &str) -> Result<Value, String> {
     client.get(url).send().await.map_err(|e| e.to_string())?.error_for_status().map_err(|e| e.to_string())?.json::<Value>().await.map_err(|e| e.to_string())
@@ -24,20 +19,16 @@ async fn download_file(client: &reqwest::Client, url: &str, path: &Path, expecte
     if path.exists() {
         if let Some(hash) = expected_hash {
             let existing = fs::read(path).map_err(|e| e.to_string())?;
-            if sha256(&existing) == hash { return Ok(()); }
+            if sha1(&existing) == hash { return Ok(()); }
         } else { return Ok(()); }
     }
     if let Some(parent) = path.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
     let bytes = client.get(url).send().await.map_err(|e| e.to_string())?.error_for_status().map_err(|e| e.to_string())?.bytes().await.map_err(|e| e.to_string())?;
-    if let Some(hash) = expected_hash {
-        if sha256(&bytes) != hash { return Err(format!("Checksum mismatch while downloading {}", url)); }
-    }
+    if let Some(hash) = expected_hash { if sha1(&bytes) != hash { return Err(format!("Checksum mismatch while downloading {}", url)); } }
     fs::write(path, &bytes).map_err(|e| e.to_string())
 }
 
-fn os_name() -> &'static str {
-    if cfg!(target_os = "windows") { "windows" } else if cfg!(target_os = "macos") { "osx" } else { "linux" }
-}
+fn os_name() -> &'static str { if cfg!(target_os = "windows") { "windows" } else if cfg!(target_os = "macos") { "osx" } else { "linux" } }
 
 fn rules_allow(value: &Value) -> bool {
     let Some(rules) = value.get("rules").and_then(Value::as_array) else { return true; };
@@ -54,20 +45,21 @@ fn rules_allow(value: &Value) -> bool {
 
 fn substitute(mut s: String, game_dir: &Path, assets_dir: &Path, asset_index: &str, natives_dir: &Path, instance: &str) -> String {
     let username = std::env::var("BLOCKPILOT_PLAYER").unwrap_or_else(|_| "Steve".into());
-    let mut hasher = Sha256::new(); hasher.update(username.as_bytes());
-    let hex = format!("{:x}", hasher.finalize());
-    let uuid = format!("{}-{}-{}-{}-{}", &hex[0..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..32]);
+    let uuid = offline_uuid(&username);
+    let game_dir_s = game_dir.to_string_lossy().to_string();
+    let assets_dir_s = assets_dir.to_string_lossy().to_string();
+    let natives_dir_s = natives_dir.to_string_lossy().to_string();
+    let library_dir_s = game_dir.join("libraries").to_string_lossy().to_string();
     let replacements = [
-        ("${auth_player_name}", username.as_str()), ("${auth_uuid}", uuid.as_str()),
-        ("${auth_access_token}", "0"), ("${user_type}", "legacy"), ("${version_name}", VERSION),
-        ("${version_type}", "release"), ("${assets_root}", assets_dir.to_string_lossy().as_ref()),
-        ("${assets_index_name}", asset_index), ("${game_directory}", game_dir.to_string_lossy().as_ref()),
-        ("${natives_directory}", natives_dir.to_string_lossy().as_ref()), ("${library_directory}", game_dir.join("libraries").to_string_lossy().as_ref()),
-        ("${classpath_separator}", if cfg!(target_os = "windows") { ";" } else { ":" }),
-        ("${launcher_name}", "BlockPilot"), ("${launcher_version}", "0.1.0"), ("${clientid}", ""), ("${auth_xuid}", ""),
+        ("${auth_player_name}", username.as_str()), ("${auth_uuid}", uuid.as_str()), ("${auth_access_token}", "0"),
+        ("${user_type}", "legacy"), ("${version_name}", VERSION), ("${version_type}", "release"),
+        ("${assets_root}", assets_dir_s.as_str()), ("${assets_index_name}", asset_index), ("${game_directory}", game_dir_s.as_str()),
+        ("${natives_directory}", natives_dir_s.as_str()), ("${library_directory}", library_dir_s.as_str()),
+        ("${classpath_separator}", if cfg!(target_os = "windows") { ";" } else { ":" }), ("${launcher_name}", "BlockPilot"),
+        ("${launcher_version}", "0.1.0"), ("${clientid}", ""), ("${auth_xuid}", ""), ("${instance_name}", instance),
     ];
     for (from, to) in replacements { s = s.replace(from, to); }
-    s.replace("${instance_name}", instance)
+    s
 }
 
 fn collect_args(value: &Value, game_dir: &Path, assets_dir: &Path, asset_index: &str, natives_dir: &Path, instance: &str) -> Vec<String> {
@@ -95,9 +87,7 @@ async fn launch_instance(app: tauri::AppHandle, instance: String) -> Result<Stri
     let versions_dir = game_dir.join("versions");
     let assets_dir = game_dir.join("assets");
     let natives_dir = instance_dir.join("natives");
-    fs::create_dir_all(&libraries_dir).map_err(|e| e.to_string())?;
-    fs::create_dir_all(&versions_dir).map_err(|e| e.to_string())?;
-    fs::create_dir_all(&natives_dir).map_err(|e| e.to_string())?;
+    for dir in [&libraries_dir, &versions_dir, &assets_dir, &natives_dir] { fs::create_dir_all(dir).map_err(|e| e.to_string())?; }
 
     let client = reqwest::Client::builder().user_agent("BlockPilot/0.1.0").build().map_err(|e| e.to_string())?;
     let manifest = fetch_json(&client, VERSION_MANIFEST).await?;
@@ -110,7 +100,7 @@ async fn launch_instance(app: tauri::AppHandle, instance: String) -> Result<Stri
     let client_download = meta.get("downloads").and_then(|d| d.get("client")).ok_or("Minecraft client download is missing")?;
     download_file(&client, client_download.get("url").and_then(Value::as_str).ok_or("Client URL missing")?, &client_jar, client_download.get("sha1").and_then(Value::as_str)).await?;
 
-    let mut classpath: Vec<String> = Vec::new();
+    let mut classpath = Vec::new();
     if let Some(libs) = meta.get("libraries").and_then(Value::as_array) {
         for lib in libs {
             if !rules_allow(lib) { continue; }
@@ -133,7 +123,8 @@ async fn launch_instance(app: tauri::AppHandle, instance: String) -> Result<Stri
                             let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
                             let name = entry.name().to_string();
                             if name.starts_with("META-INF/") || name.ends_with('/') { continue; }
-                            let out = natives_dir.join(Path::new(&name).file_name().ok_or("Invalid native filename")?);
+                            let filename = Path::new(&name).file_name().ok_or("Invalid native filename")?;
+                            let out = natives_dir.join(filename);
                             let mut dest = fs::File::create(out).map_err(|e| e.to_string())?;
                             std::io::copy(&mut entry, &mut dest).map_err(|e| e.to_string())?;
                         }
@@ -160,16 +151,15 @@ async fn launch_instance(app: tauri::AppHandle, instance: String) -> Result<Stri
     }
 
     let main_class = meta.get("mainClass").and_then(Value::as_str).ok_or("Minecraft main class missing")?;
-    let mut args: Vec<String> = vec!["-Xmx4G".into(), format!("-Djava.library.path={}", natives_dir.to_string_lossy()), "-cp".into(), classpath.join(if cfg!(target_os = "windows") { ";" } else { ":" }).into(), main_class.into()];
+    let separator = if cfg!(target_os = "windows") { ";" } else { ":" };
+    let mut args = vec!["-Xmx4G".into(), format!("-Djava.library.path={}", natives_dir.to_string_lossy()), "-cp".into(), classpath.join(separator), main_class.into()];
     if let Some(jvm) = meta.get("arguments").and_then(|a| a.get("jvm")) { args.extend(collect_args(jvm, &game_dir, &assets_dir, asset_id, &natives_dir, &instance)); }
     if let Some(game) = meta.get("arguments").and_then(|a| a.get("game")) { args.extend(collect_args(game, &game_dir, &assets_dir, asset_id, &natives_dir, &instance)); }
     else if let Some(legacy) = meta.get("minecraftArguments").and_then(Value::as_str) { args.extend(legacy.split_whitespace().map(|s| substitute(s.into(), &game_dir, &assets_dir, asset_id, &natives_dir, &instance))); }
 
     if !args.iter().any(|a| a == "--username") {
         let username = std::env::var("BLOCKPILOT_PLAYER").unwrap_or_else(|_| "Steve".into());
-        let mut h = Sha256::new(); h.update(username.as_bytes()); let hex = format!("{:x}", h.finalize());
-        let uuid = format!("{}-{}-{}-{}-{}", &hex[0..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..32]);
-        args.extend(["--username".into(), username, "--uuid".into(), uuid, "--accessToken".into(), "0".into(), "--userType".into(), "legacy".into(), "--version".into(), VERSION.into(), "--versionType".into(), "release".into(), "--gameDir".into(), game_dir.to_string_lossy().to_string(), "--assetsDir".into(), assets_dir.to_string_lossy().to_string(), "--assetIndex".into(), asset_id.into()]);
+        args.extend(["--username".into(), username.clone(), "--uuid".into(), offline_uuid(&username), "--accessToken".into(), "0".into(), "--userType".into(), "legacy".into(), "--version".into(), VERSION.into(), "--versionType".into(), "release".into(), "--gameDir".into(), game_dir.to_string_lossy().to_string(), "--assetsDir".into(), assets_dir.to_string_lossy().to_string(), "--assetIndex".into(), asset_id.into()]);
     }
 
     let mut child = Command::new("java").args(&args).current_dir(&game_dir).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|e| format!("Could not start Java. Install Java 21 or select a Java 21 runtime in Settings. ({})", e))?;
@@ -180,13 +170,12 @@ async fn launch_instance(app: tauri::AppHandle, instance: String) -> Result<Stri
 
 #[tauri::command]
 fn runtime_info() -> Result<String, String> {
-    let java = Command::new("java").arg("-version").output();
-    match java { Ok(output) => Ok(String::from_utf8_lossy(&output.stderr).lines().next().unwrap_or("Java detected").to_string()), Err(_) => Err("Java was not found on PATH".into()) }
+    match Command::new("java").arg("-version").output() { Ok(output) => Ok(String::from_utf8_lossy(&output.stderr).lines().next().unwrap_or("Java detected").to_string()), Err(_) => Err("Java was not found on PATH".into()) }
 }
 
 #[tauri::command]
 fn launcher_data_dir(app: tauri::AppHandle) -> Result<String, String> {
-    let dir: PathBuf = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.to_string_lossy().to_string())
 }
