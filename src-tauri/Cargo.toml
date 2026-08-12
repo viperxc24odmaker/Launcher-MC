@@ -1,6 +1,6 @@
 [package]
 name = "blockpilot"
-version = "1.0.0"
+version = "0.1.0"
 description = "BlockPilot Minecraft Launcher"
 authors = ["V24"]
 edition = "2021"
