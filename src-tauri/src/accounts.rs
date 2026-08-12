@@ -7,10 +7,12 @@ use tauri::Manager;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Account {
     pub id: String,
-    pub kind: String,           // "offline" | "elyby"
+    pub kind: String,           // "offline" | "elyby" | "microsoft"
     pub username: String,
     pub uuid: String,
     pub access_token: Option<String>,
+    #[serde(default)]
+    pub refresh_token: Option<String>,
     pub skin_path: Option<String>,
     pub cape_id: Option<String>,
     pub active: bool,
@@ -65,6 +67,7 @@ pub fn add_offline_account(app: tauri::AppHandle, username: String) -> Result<Ac
         username: username.clone(),
         uuid: offline_uuid(&username),
         access_token: None,
+        refresh_token: None,
         skin_path: None,
         cape_id: None,
         active: !has_active,
@@ -106,6 +109,7 @@ pub async fn add_elyby_account(app: tauri::AppHandle, username: String, password
         username: real_username,
         uuid,
         access_token: Some(access_token),
+        refresh_token: None,
         skin_path: None,
         cape_id: None,
         active: !has_active,
@@ -134,6 +138,14 @@ pub fn set_active_account(app: tauri::AppHandle, id: String) -> Result<(), Strin
 
 pub fn get_active_account(app: &tauri::AppHandle) -> Option<Account> {
     load_all(app).ok()?.into_iter().find(|a| a.active)
+}
+
+pub fn upsert_account(app: &tauri::AppHandle, account: Account) -> Result<(), String> {
+    let mut accounts = load_all(app)?;
+    accounts.retain(|a| a.id != account.id);
+    if account.active { for a in accounts.iter_mut() { a.active = false; } }
+    accounts.push(account);
+    save_all(app, &accounts)
 }
 
 #[tauri::command]

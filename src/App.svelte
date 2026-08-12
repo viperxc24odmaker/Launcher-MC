@@ -127,7 +127,7 @@
   type Account = { id:string; kind:'offline'|'elyby'; username:string; uuid:string; access_token?:string|null; skin_path?:string|null; cape_id?:string|null; active:boolean };
   let accountsList: Account[] = [];
   let accountsLoaded = false;
-  let authMode: 'offline'|'elyby' = 'offline';
+  let authMode: 'offline'|'elyby'|'microsoft' = 'offline';
   let offlineUsername = '';
   let elybyUsername = '';
   let elybyPassword = '';
@@ -168,6 +168,31 @@
     }catch(e){ notify(String(e),'error'); }
     finally{ authBusy = false; }
   }
+
+  // ---- microsoft ----
+  let msClientId = '';
+  let msClientIdSaved = false;
+  let msSigningIn = false;
+  async function loadMsSettings(){
+    try{
+      const settings:{ms_client_id?:string|null} = await invoke('get_launcher_settings');
+      if(settings.ms_client_id){ msClientId = settings.ms_client_id; msClientIdSaved = true; }
+    }catch(e){ /* first run, no settings file yet - not an error */ }
+  }
+  async function saveMsClientId(){
+    if(!msClientId.trim()){ notify('Paste your Azure app Client ID first','error'); return; }
+    try{ await invoke('set_ms_client_id',{clientId:msClientId}); msClientIdSaved=true; notify('Client ID saved','success'); }
+    catch(e){ notify(String(e),'error'); }
+  }
+  async function signInMicrosoft(){
+    msSigningIn = true;
+    try{
+      const acc:Account = await invoke('start_microsoft_login');
+      notify(`Signed in as ${acc.username} (Microsoft)`,'success');
+      await loadAccounts();
+    }catch(e){ notify(String(e),'error'); }
+    finally{ msSigningIn = false; }
+  }
   async function switchAccount(id:string){
     try{ await invoke('set_active_account',{id}); await loadAccounts(); notify('Active account switched','success'); }
     catch(e){ notify(String(e),'error'); }
@@ -203,7 +228,7 @@
     ctx.fillStyle = hasSkin ? '#6b9a73' : '#345f3b';
     ctx.fillRect(24,40,32,48); // torso block
   }
-  $: if(page==='Accounts' && !accountsLoaded){ loadAccounts(); }
+  $: if(page==='Accounts' && !accountsLoaded){ loadAccounts(); loadMsSettings(); }
   $: if(activeAccount && skinCanvasEl){ drawActiveSkin(); }
 
   onMount(() => { loadAccounts(); });
@@ -220,7 +245,7 @@
     <nav>{#each nav as item}{@const Icon=item[1]}<button class:active={page===item[0]} onclick={()=>page=item[0]}><Icon size={18}/><span>{item[0]}</span></button>{/each}</nav>
     <div class="sidebar-bottom">
       <div class="sync-card"><div class="sync-icon"><Cloud size={17}/></div><div><b>Cloud sync</b><small>Everything up to date</small></div><span class="online"></span></div>
-      <div class="account-mini"><div class="avatar">{(activeAccount?.username||'S').charAt(0).toUpperCase()}</div><div><b>{activeAccount?.username||'No account'}</b><small>{activeAccount ? (activeAccount.kind==='elyby'?'ely.by account':'Offline profile') : 'Add one in Accounts'}</small></div><span class="dot"></span></div>
+      <div class="account-mini"><div class="avatar">{(activeAccount?.username||'S').charAt(0).toUpperCase()}</div><div><b>{activeAccount?.username||'No account'}</b><small>{activeAccount ? (activeAccount.kind==='microsoft'?'Microsoft account':activeAccount.kind==='elyby'?'ely.by account':'Offline profile') : 'Add one in Accounts'}</small></div><span class="dot"></span></div>
     </div>
   </aside>
   <main class="main">
@@ -391,6 +416,7 @@
           <div class="account-tabs">
             <button class:active={authMode==='offline'} onclick={()=>authMode='offline'}><UserPlus size={14}/> Offline profile</button>
             <button class:active={authMode==='elyby'} onclick={()=>authMode='elyby'}><LogIn size={14}/> ely.by login</button>
+            <button class:active={authMode==='microsoft'} onclick={()=>authMode='microsoft'}><ShieldCheck size={14}/> Microsoft</button>
           </div>
           {#if authMode==='offline'}
             <div class="auth-form">
@@ -405,6 +431,17 @@
               <label class="search inner wide"><input type="password" placeholder="Password…" bind:value={elybyPassword} onkeydown={(e)=>e.key==='Enter' && loginElyBy()}/></label>
               <button class="row-action solid" onclick={loginElyBy} disabled={authBusy}>{authBusy?'SIGNING IN…':'SIGN IN'}</button>
             </div>
+          {:else if authMode==='microsoft'}
+            <div class="auth-form">
+              <p class="auth-hint"><ShieldCheck size={12}/> Real Xbox/Minecraft sign-in. Needs a free Azure app Client ID once - opens your browser, signs in, comes right back.</p>
+              {#if !msClientIdSaved}
+                <label class="search inner wide"><input placeholder="Azure app Client ID…" bind:value={msClientId}/></label>
+                <button class="row-action solid" onclick={saveMsClientId}>SAVE CLIENT ID</button>
+              {:else}
+                <button class="row-action solid" onclick={signInMicrosoft} disabled={msSigningIn}>{msSigningIn?'WAITING FOR BROWSER…':'SIGN IN WITH MICROSOFT'}</button>
+                <button class="row-action" style="align-self:flex-start" onclick={()=>msClientIdSaved=false}>Change client ID</button>
+              {/if}
+            </div>
           {/if}
 
           <div class="panel-title" style="margin-top:24px">Saved accounts</div>
@@ -412,7 +449,7 @@
             {#each accountsList as acc}
               <div class="row">
                 <div class="avatar small" style="min-width:26px">{acc.username.charAt(0).toUpperCase()}</div>
-                <div class="row-main"><b>{acc.username}</b><span>{acc.kind==='elyby'?'ely.by account':'Offline profile'} {acc.active?'· active':''}</span></div>
+                <div class="row-main"><b>{acc.username}</b><span>{acc.kind==='elyby'?'ely.by account':acc.kind==='microsoft'?'Microsoft account':'Offline profile'} {acc.active?'· active':''}</span></div>
                 {#if acc.active}<span class="state"><Star size={11}/> ACTIVE</span>{:else}<button class="row-action" onclick={()=>switchAccount(acc.id)}>USE</button>{/if}
                 <button class="row-action danger" onclick={()=>removeAccountFn(acc.id)}><Trash2 size={13}/></button>
               </div>
@@ -435,8 +472,10 @@
                   <button class:active={(activeAccount.cape_id||'')===c.id} onclick={()=>pickCape(activeAccount.id, c.id)}>{c.name}</button>
                 {/each}
               </div>
+            {:else if activeAccount.kind==='microsoft'}
+              <small style="color:var(--muted);display:block;margin-top:12px">Microsoft accounts use your official Mojang skin/cape automatically - manage those at minecraft.net.</small>
             {:else}
-              <small style="color:var(--muted);display:block;margin-top:12px">Capes need an ely.by account to render in-game.</small>
+              <small style="color:var(--muted);display:block;margin-top:12px">Capes need an ely.by or Microsoft account to render in-game.</small>
             {/if}
           {:else}
             <div class="empty-state"><Shirt size={28}/><p>Add an account to manage skins and capes</p></div>
