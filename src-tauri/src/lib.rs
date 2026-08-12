@@ -66,7 +66,7 @@ fn collect_args(value: &Value, game_dir: &Path, assets_dir: &Path, asset_index: 
         let raw = entry.get("value").unwrap_or(entry);
         match raw {
             Value::String(s) => out.push(substitute(s.clone(), game_dir, assets_dir, asset_index, natives_dir, instance, version, username, uuid, access_token, user_type)),
-            Value::Array(values) => for v in values.iter().filter_map(Value::as_str) { out.push(substitute(v.to_string(), game_dir, assets_dir, asset_index, natives_dir, instance, version, username, uuid, access_token, user_type)); },
+            Value::Array(values) => for v in values.iter().filter_map(Value::as_str) { out.push(substitute(v.to_string(), game_dir, assets_dir, asset_index, natives_dir, instance, version, username, uuid, access_token, user_type)); }
             _ => {}
         }
     }
@@ -117,8 +117,8 @@ async fn neoforge_version(client: &reqwest::Client, mc: &str, requested: Option<
 
 async fn install_loader(client: &reqwest::Client, game_dir: &Path, mc: &str, loader: &str, requested: Option<&str>, app: &tauri::AppHandle, instance: &str) -> Result<String, String> {
     let (url, version, label) = match loader {
-        "forge" => { let v = forge_version(client, mc, requested).await?; (format!("https://maven.minecraftforge.net/net/minecraftforge/forge/{}-{}/forge-{}-{}-installer.jar", mc, v, mc, v), v, "Forge") },
-        "neoforge" => { let v = neoforge_version(client, mc, requested).await?; (format!("https://maven.neoforged.net/releases/net/neoforged/neoforge/{}/neoforge-{}-installer.jar", v, v), v, "NeoForge") },
+        "forge" => { let v = forge_version(client, mc, requested).await?; (format!("https://maven.minecraftforge.net/net/minecraftforge/forge/{}-{}/forge-{}-{}-installer.jar", mc, v, mc, v), v, "Forge") }
+        "neoforge" => { let v = neoforge_version(client, mc, requested).await?; (format!("https://maven.neoforged.net/releases/net/neoforged/neoforge/{}/neoforge-{}-installer.jar", v, v), v, "NeoForge") }
         _ => return Err(format!("Unknown loader {}", loader))
     };
     let installer_dir = game_dir.join(".blockpilot"); fs::create_dir_all(&installer_dir).map_err(|e| e.to_string())?;
@@ -156,7 +156,7 @@ async fn find_loader_profile(game_dir: &Path, loader: &str, loader_version: &str
 }
 
 async fn version_meta(client: &reqwest::Client, manifest: &Value, id: &str) -> Result<Value, String> {
-    let url = manifest.get("versions").and_then(Value::as_array).and_then(|a| a.iter().find(|v| v.get("id").and_then(Value::as_str)==Some(id))).and_then(|v| v.get("url")).and_then(Value::as_str).ok_or("Version metadata not found")?;
+    let url = manifest.get("versions").and_then(Value::as_array).and_then(|a| a.iter().find(|v| v.get("id").and_then(Value::as_str)==Some(id))).and_then(|v| v.get("url")).and_then(Value::as_str).ok_or("Version not found in manifest")?;
     fetch_json(client, url).await
 }
 
@@ -187,7 +187,7 @@ async fn resolve_inherits(client: &reqwest::Client, manifest: &Value, mut meta: 
     Ok(merged)
 }
 
-async fn download_libraries_and_natives(client: &reqwest::Client, meta: &Value, game_dir: &Path, natives_dir: &Path, classpath: &mut Vec<String>, app: &tauri::AppHandle, instance: &str) -> Result<(),String> {
+async fn download_libraries_and_natives(client: &reqwest::Client, meta: &Value, game_dir: &Path, natives_dir: &Path, classpath: &mut Vec<String>, app: &tauri::AppHandle, instance: &str) -> Result<(), String> {
     let libraries_dir = game_dir.join("libraries"); fs::create_dir_all(&libraries_dir).map_err(|e| e.to_string())?;
     let libs = meta.get("libraries").and_then(Value::as_array).cloned().unwrap_or_default();
     let total = libs.len();
@@ -210,7 +210,7 @@ async fn download_libraries_and_natives(client: &reqwest::Client, meta: &Value, 
             if let (Some(url),Some(path))=(native.get("url").and_then(Value::as_str),native.get("path").and_then(Value::as_str)) {
                 let file=libraries_dir.join(path); download_file(client,url,&file,native.get("sha1").and_then(Value::as_str)).await?;
                 let archive=fs::File::open(&file).map_err(|e|e.to_string())?; let mut zip=zip::ZipArchive::new(archive).map_err(|e|e.to_string())?;
-                for i in 0..zip.len(){let mut entry=zip.by_index(i).map_err(|e|e.to_string())?;let name=entry.name().to_string();if name.starts_with("META-INF/")||name.ends_with('/'){continue;}let mut buf=Vec::new();entry.read_to_end(&mut buf).map_err(|e|e.to_string())?;fs::write(natives_dir.join(name),buf).map_err(|e|e.to_string())?;}
+                for i in 0..zip.len(){let mut entry=zip.by_index(i).map_err(|e|e.to_string())?;let name=entry.name().to_string();if name.starts_with("META-INF/")||name.ends_with('/'){continue;}let mut buf=Vec::new();entry.read_to_end(&mut buf).map_err(|e|e.to_string())?;fs::write(natives_dir.join(name),&buf).map_err(|e|e.to_string())?;}
             }
         }
     }
@@ -222,7 +222,7 @@ async fn download_assets(client: &reqwest::Client, meta: &Value, assets_dir: &Pa
     let index_file=assets_dir.join("indexes").join(format!("{}.json",asset_id));
     download_file(client,asset_index.get("url").and_then(Value::as_str).ok_or("Asset index URL missing")?,&index_file,asset_index.get("sha1").and_then(Value::as_str)).await?;
     let assets_json:Value=serde_json::from_slice(&fs::read(&index_file).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
-    if let Some(objects)=assets_json.get("objects").and_then(Value::as_object){let total=objects.len();for(i,o)in objects.values().enumerate(){if i%100==0{emit_progress(app,instance,"assets",&format!("Downloading assets… {}/{}",i,total));}if let Some(url)=o.get("url").and_then(Value::as_str){let path=assets_dir.join("objects").join(&url[0..2]).join(&url[2..]);download_file(client,&format!("https://resources.download.minecraft.net/{}",url),&path,Some(o.get("hash").and_then(Value::as_str).unwrap_or(""))).await?;}}}
+    if let Some(objects)=assets_json.get("objects").and_then(Value::as_object){let total=objects.len();for(i,o)in objects.values().enumerate(){if i%100==0{emit_progress(app,instance,"assets",&format!("Downloading assets… {}/{}",i+1,total));}if let Some(hash)=o.get("hash").and_then(Value::as_str){let file=assets_dir.join("objects").join(&hash[0..2]).join(&hash[2..]); download_file(client,&format!("https://resources.download.minecraft.net/{}/{}",(&hash[0..2]),&hash[2..]),&file,Some(hash)).await?;}}}
     Ok(asset_id)
 }
 
@@ -240,37 +240,90 @@ async fn launch_instance(app: tauri::AppHandle, instance: String) -> Result<Stri
     let client_jar=version_dir.join(format!("{}.jar",mc_version)); let cd=vanilla_meta.get("downloads").and_then(|d|d.get("client")).ok_or("Minecraft client download is missing")?;
     emit_progress(&app,&instance,"client",&format!("Downloading Minecraft {} client…",mc_version)); download_file(&client,cd.get("url").and_then(Value::as_str).ok_or("Client URL missing")?,&client_jar,cd.get("sha1").and_then(Value::as_str)).await?;
 
-    let mut meta=vanilla_meta.clone(); let mut main_class=meta.get("mainClass").and_then(Value::as_str).ok_or("Minecraft main class missing")?.to_string(); let mut installed_loader_version=loader_version_pref.clone();
+    let mut meta=vanilla_meta.clone(); let mut main_class=meta.get("mainClass").and_then(Value::as_str).ok_or("Minecraft main class missing")?.to_string(); let mut installed_loader_version=loader.clone();
     match loader.as_str(){
         "vanilla"=>{},
-        "fabric"=>{emit_progress(&app,&instance,"fabric","Installing Fabric loader…");let lv=if installed_loader_version.is_empty(){versions::list_fabric_loaders(mc_version.clone()).await?.into_iter().next().map(|l|l.version).unwrap_or_default()}else{installed_loader_version.clone()};if let Ok(profile)=versions::fetch_fabric_meta(&client,&mc_version,&lv).await{meta=profile;installed_loader_version=lv;}else{return Err("Failed to fetch Fabric metadata".into());}}
-        "forge"|"neoforge"=>{let v=install_loader(&client,&game_dir,&mc_version,&loader,&loader_version_pref.as_deref(),&app,&instance).await?;installed_loader_version=v;let lp=find_loader_profile(&game_dir,&loader,&installed_loader_version).await?;meta=lp;if let Some(mc)=meta.get("mainClass").and_then(Value::as_str){main_class=mc.to_string();}}
+        "fabric"=>{emit_progress(&app,&instance,"fabric","Installing Fabric loader…");let lv=if installed_loader_version.is_empty(){versions::list_fabric_loaders(mc_version.clone()).await?.into_iter().next().unwrap_or_default()}else{installed_loader_version.clone()};installed_loader_version=lv.clone();let profile_data=versions::get_fabric_profile(&client,&mc_version,&lv).await?;meta=resolve_inherits(&client,&manifest,profile_data).await?;main_class=meta.get("mainClass").and_then(Value::as_str).unwrap_or("net.fabricmc.loader.impl.launch.knot.KnotClient").to_string();},
+        "forge"|"neoforge"=>{let v=install_loader(&client,&game_dir,&mc_version,&loader,&loader_version_pref.as_deref(),&app,&instance).await?;installed_loader_version=v;let lp=find_loader_profile(&game_dir,&loader,&installed_loader_version).await?;meta=resolve_inherits(&client,&manifest,lp).await?;main_class=meta.get("mainClass").and_then(Value::as_str).unwrap_or("cpw.mods.bootstraplauncher.BootstrapLauncher").to_string();},
         other=>return Err(format!("Unsupported loader '{}'. Use vanilla, fabric, forge, or neoforge.",other))
     }
     let mut classpath=Vec::new(); download_libraries_and_natives(&client,&meta,&game_dir,&natives_dir,&mut classpath,&app,&instance).await?; classpath.push(client_jar.to_string_lossy().to_string());
     let asset_id=download_assets(&client,&meta,&assets_dir,&app,&instance).await?;
 
-    let account=accounts::get_active_account(&app); let (username,uuid,access_token,user_type)=match &account{Some(a)if a.kind=="microsoft"=>(a.username.clone(),a.uuid.clone(),a.access_token.clone(),"msa".to_string()),Some(a)if a.kind=="elyby"=>(a.username.clone(),a.uuid.clone(),a.access_token.clone(),"legacy".to_string()),_=>{"Steve".to_string(),offline_uuid("Steve"),"".to_string(),"legacy".to_string()}};
+    let account=accounts::get_active_account(&app); let (username,uuid,access_token,user_type)=match &account{Some(a)if a.kind=="microsoft"=>(a.username.clone(),a.uuid.clone(),a.access_token.clone(),"msa")Some(a)if a.kind=="elyby"=>(a.username.clone(),a.uuid.clone(),a.access_token.clone(),"elyby")Some(a)=>(a.username.clone(),a.uuid.clone(),"".into(),"legacy")None=>(String::new(),offline_uuid(""),String::new(),"")};
     let separator=if cfg!(target_os="windows"){";"}else{":"};
-    let ram=profile.get("ram_mb").and_then(Value::as_u64).filter(|v|*v>=512).unwrap_or(4096); let mut jvm_args=vec![format!("-Xmx{}M",ram),format!("-Djava.library.path={}",natives_dir.to_string_lossy()),"-XX:+IgnoreUnrecognizedVMOptions".to_string(),"--add-opens=java.base/java.io=ALL-UNNAMED".to_string()];
-    if let Some(jvm)=profile.get("jvm_args").and_then(Value::as_array){for v in jvm.iter().filter_map(Value::as_str){jvm_args.push(substitute(v.to_string(),&game_dir,&assets_dir,&asset_id,&natives_dir,&instance,&mc_version,&username,&uuid,&access_token,&user_type));}}
-    if let Some(jvm)=meta.get("arguments").and_then(|a|a.get("jvm")){jvm_args.extend(collect_args(jvm,&game_dir,&assets_dir,&asset_id,&natives_dir,&instance,&mc_version,&username,&uuid,&access_token,&user_type));}
+    let ram=profile.get("ram_mb").and_then(Value::as_u64).filter(|v|*v>=512).unwrap_or(4096); let mut jvm_args=vec![format!("-Xmx{}M",ram),format!("-Djava.library.path={}",natives_dir.to_string_lossy()),"-XX:+UnlockExperimentalVMOptions".into(),"-XX:G1NewCollectionPercentage=20".into(),"-XX:G1ReservePercent=20".into(),"-XX:G1HeapRegionSize=32M".into()];
+    if let Some(jvm)=profile.get("jvm_args").and_then(Value::as_array){for v in jvm.iter().filter_map(Value::as_str){jvm_args.push(substitute(v.to_string(),&game_dir,&assets_dir,&asset_id,&natives_dir,&instance,&mc_version,&username,&uuid,&access_token,user_type));}}
+    if let Some(jvm)=meta.get("arguments").and_then(|a|a.get("jvm")){jvm_args.extend(collect_args(jvm,&game_dir,&assets_dir,&asset_id,&natives_dir,&instance,&mc_version,&username,&uuid,&access_token,user_type));}
     if let Some(a)=&account{if a.kind=="elyby"{emit_progress(&app,&instance,"identity","Preparing ely.by authentication…");let injector=ensure_authlib_injector(&client,&root).await?;jvm_args.push(format!("-javaagent:{}",injector.to_string_lossy()));}}
     let mut args=jvm_args; args.extend(["-cp".into(),classpath.join(separator),main_class.clone()]);
-    if let Some(game)=meta.get("arguments").and_then(|a|a.get("game")){args.extend(collect_args(game,&game_dir,&assets_dir,&asset_id,&natives_dir,&instance,&mc_version,&username,&uuid,&access_token,&user_type));}
-    else if let Some(legacy)=meta.get("minecraftArguments").and_then(Value::as_str){args.extend(legacy.split_whitespace().map(|s|substitute(s.into(),&game_dir,&assets_dir,&asset_id,&natives_dir,&instance,&mc_version,&username,&uuid,&access_token,&user_type)));}
-    if !args.iter().any(|a|a=="--username"){args.extend(["--username".into(),username.clone(),"--uuid".into(),uuid.clone(),"--accessToken".into(),access_token.clone(),"--userType".into(),user_type.clone(),"--versionType".into(),"BlockPilot".into()]);}
+    if let Some(game)=meta.get("arguments").and_then(|a|a.get("game")){args.extend(collect_args(game,&game_dir,&assets_dir,&asset_id,&natives_dir,&instance,&mc_version,&username,&uuid,&access_token,user_type));}
+    else if let Some(legacy)=meta.get("minecraftArguments").and_then(Value::as_str){args.extend(legacy.split_whitespace().map(|s|substitute(s.into(),&game_dir,&assets_dir,&asset_id,&natives_dir,&instance,&mc_version,&username,&uuid,&access_token,user_type)));}
+    if !args.iter().any(|a|a=="--username"){args.extend(["--username".into(),username.clone(),"--uuid".into(),uuid.clone(),"--accessToken".into(),access_token.clone(),"--userType".into(),user_type.into()]);}
     emit_progress(&app,&instance,"starting",&format!("Starting Minecraft {}{}…",mc_version,if loader!="vanilla"{format!(" with {} {}",loader,installed_loader_version)}else{"".into()}));
     let mut child=Command::new(java_command()).args(&args).current_dir(&game_dir).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|e|format!("Could not start Java: {}",e))?;
     let pid=child.id(); tauri::async_runtime::spawn(async move{let _=child.wait();});
     Ok(format!("Minecraft {} launched for '{}' as {} (PID {})",mc_version,instance,username,pid))
 }
 
-#[tauri::command] fn runtime_info()->Result<String,String>{match Command::new(java_command()).arg("-version").output(){Ok(o)=>Ok(String::from_utf8_lossy(&o.stderr).lines().next().unwrap_or("Java not installed").to_string()),Err(_)=>Err("Java not found".to_string())}}
-#[tauri::command] fn launcher_data_dir(app:tauri::AppHandle)->Result<String,String>{let dir=app.path().app_data_dir().map_err(|e|e.to_string())?;fs::create_dir_all(&dir).map_err(|e|e.to_string())?;Ok(dir.to_string_lossy().to_string())}
-#[tauri::command] fn open_instance_folder(app:tauri::AppHandle,instance:String)->Result<(),String>{let root=app.path().app_data_dir().map_err(|e|e.to_string())?;let dir=root.join("instances").join(safe_name(&instance));fs::create_dir_all(&dir).map_err(|e|e.to_string())?;#[cfg(target_os="windows")]{Command::new("explorer").arg(dir).spawn().map_err(|e|e.to_string())?;}#[cfg(target_os="macos")]{Command::new("open").arg(dir).spawn().map_err(|e|e.to_string())?;}#[cfg(target_os="linux")]{Command::new("xdg-open").arg(dir).spawn().map_err(|e|e.to_string())?;}Ok(())}
-#[derive(serde::Serialize)] struct JavaRuntime{path:String,version:String}
-#[tauri::command] fn list_java_runtimes()->Result<Vec<JavaRuntime>,String>{let mut found=Vec::new();if let Ok(o)=Command::new(java_command()).arg("-version").output(){let line=String::from_utf8_lossy(&o.stderr).lines().next().unwrap_or("").to_string();if !line.is_empty(){found.push(JavaRuntime{path:java_command().to_string(),version:line});}}Ok(found)}
+#[tauri::command]
+fn runtime_info() -> Result<String, String> {
+    match Command::new(java_command()).arg("-version").output() {
+        Ok(o) => Ok(String::from_utf8_lossy(&o.stderr).lines().next().unwrap_or("Java not found").to_string()),
+        Err(e) => Err(format!("Failed to get Java version: {}", e))
+    }
+}
+
+#[tauri::command]
+fn launcher_data_dir(app: tauri::AppHandle) -> Result<String, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn open_instance_folder(app: tauri::AppHandle, instance: String) -> Result<(), String> {
+    let root = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = root.join("instances").join(safe_name(&instance));
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("explorer").arg(dir).spawn().map_err(|e| e.to_string())?;
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("open").arg(dir).spawn().map_err(|e| e.to_string())?;
+    #[cfg(target_os = "linux")]
+    std::process::Command::new("xdg-open").arg(dir).spawn().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[derive(serde::Serialize)]
+struct JavaRuntime {
+    path: String,
+    version: String,
+}
+
+#[tauri::command]
+fn list_java_runtimes() -> Result<Vec<JavaRuntime>, String> {
+    let mut found = Vec::new();
+    if let Ok(o) = Command::new(java_command()).arg("-version").output() {
+        let line = String::from_utf8_lossy(&o.stderr).lines().next().unwrap_or("").to_string();
+        found.push(JavaRuntime {
+            path: java_command().to_string(),
+            version: line,
+        });
+    }
+    Ok(found)
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run(){tauri::Builder::default().plugin(tauri_plugin_shell::init()).invoke_handler(tauri::generate_handler![launch_instance,runtime_info,launcher_data_dir,open_instance_folder,list_java_runtimes]).run(tauri::generate_context!()).expect("error while running tauri application")}
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
+        .invoke_handler(tauri::generate_handler![
+            launch_instance,
+            runtime_info,
+            launcher_data_dir,
+            open_instance_folder,
+            list_java_runtimes
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application")
+}
