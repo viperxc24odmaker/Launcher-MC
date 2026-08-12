@@ -1027,6 +1027,18 @@ async fn download_assets(
     Ok(asset_id)
 }
 
+async fn fetch_fabric_meta(
+    client: &reqwest::Client,
+    mc_version: &str,
+    loader_version: &str,
+) -> Result<Value, String> {
+    let url = format!(
+        "https://meta.fabricmc.net/v2/versions/loader/{}/{}/profile/json",
+        mc_version, loader_version
+    );
+    fetch_json(client, &url).await
+}
+
 #[tauri::command]
 async fn launch_instance(
     app: tauri::AppHandle,
@@ -1154,7 +1166,7 @@ async fn launch_instance(
         .to_string();
 
     let mut installed_loader_version =
-        loader_version_pref.clone();
+        loader_version_pref.clone().unwrap_or_default();
 
     match loader.as_str() {
         "vanilla" => {}
@@ -1188,7 +1200,7 @@ async fn launch_instance(
                 );
             }
 
-            match versions::fetch_fabric_meta(
+            match fetch_fabric_meta(
                 &client,
                 &mc_version,
                 &lv,
@@ -1216,14 +1228,14 @@ async fn launch_instance(
             let existing = find_loader_profile(
                 &game_dir,
                 &loader,
-                &loader_version_pref,
+                &loader_version_pref.clone().unwrap_or_default(),
             )
             .await;
 
             match existing {
                 Ok(profile) => {
                     meta = profile;
-                    installed_loader_version = loader_version_pref.clone();
+                    installed_loader_version = loader_version_pref.clone().unwrap_or_default();
                 }
                 Err(_) => {
                     let version = install_loader(
@@ -1231,10 +1243,14 @@ async fn launch_instance(
                         &game_dir,
                         &mc_version,
                         &loader,
-                        if loader_version_pref.is_empty() {
+                        if loader_version_pref
+                            .as_deref()
+                            .unwrap_or("")
+                            .is_empty()
+                        {
                             None
                         } else {
-                            Some(loader_version_pref.as_str())
+                            loader_version_pref.as_deref()
                         },
                         &app,
                         &instance,
@@ -1323,14 +1339,14 @@ async fn launch_instance(
         Some(a) if a.kind == "microsoft" => (
             a.username.clone(),
             a.uuid.clone(),
-            a.access_token.clone(),
+            a.access_token.clone().unwrap_or_default(),
             "msa".to_string(),
         ),
 
         Some(a) if a.kind == "elyby" => (
             a.username.clone(),
             a.uuid.clone(),
-            a.access_token.clone(),
+            a.access_token.clone().unwrap_or_default(),
             "legacy".to_string(),
         ),
 
@@ -1679,4 +1695,3 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-}
