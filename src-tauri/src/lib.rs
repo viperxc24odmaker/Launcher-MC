@@ -7,7 +7,7 @@ mod versions;
 
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
-use std::{fs, io::{Read, Write}, path::{Path, PathBuf}, process::{Command, Stdio}};
+use std::{fs, io::Read, path::{Path, PathBuf}, process::Command};
 use tauri::{Emitter, Manager};
 
 const VERSION_MANIFEST: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
@@ -101,7 +101,7 @@ async fn forge_version(client: &reqwest::Client, mc: &str, requested: Option<&st
 fn neoforge_prefix(mc: &str) -> String {
     let mut p = mc.split('.');
     let major = p.next().unwrap_or("");
-    let minor = p.next().unwrap_or("");
+    let _minor = p.next().unwrap_or("");
     let patch = p.next();
     match patch { Some(patch) => format!("{}.{}", major.trim_start_matches('1'), patch), None => format!("{}.0", major.trim_start_matches('1')) }
 }
@@ -250,7 +250,13 @@ async fn launch_instance(app: tauri::AppHandle, instance: String) -> Result<Stri
     let mut classpath=Vec::new(); download_libraries_and_natives(&client,&meta,&game_dir,&natives_dir,&mut classpath,&app,&instance).await?; classpath.push(client_jar.to_string_lossy().to_string());
     let asset_id=download_assets(&client,&meta,&assets_dir,&app,&instance).await?;
 
-    let account=accounts::get_active_account(&app); let (username,uuid,access_token,user_type)=match &account{Some(a)if a.kind=="microsoft"=>(a.username.clone(),a.uuid.clone(),a.access_token.clone(),"msa")Some(a)if a.kind=="elyby"=>(a.username.clone(),a.uuid.clone(),a.access_token.clone(),"elyby")Some(a)=>(a.username.clone(),a.uuid.clone(),"".into(),"legacy")None=>(String::new(),offline_uuid(""),String::new(),"")};
+    let account=accounts::get_active_account(&app);
+    let (username,uuid,access_token,user_type)=match &account{
+        Some(a) if a.kind=="microsoft"=>(a.username.clone(),a.uuid.clone(),a.access_token.clone(),"msa"),
+        Some(a) if a.kind=="elyby"=>(a.username.clone(),a.uuid.clone(),a.access_token.clone(),"elyby"),
+        Some(a)=>(a.username.clone(),a.uuid.clone(),"".into(),"legacy"),
+        None=>{"Steve".to_string(),offline_uuid("Steve"),String::new(),"legacy"}
+    };
     let separator=if cfg!(target_os="windows"){";"}else{":"};
     let ram=profile.get("ram_mb").and_then(Value::as_u64).filter(|v|*v>=512).unwrap_or(4096); let mut jvm_args=vec![format!("-Xmx{}M",ram),format!("-Djava.library.path={}",natives_dir.to_string_lossy()),"-XX:+UnlockExperimentalVMOptions".into(),"-XX:G1NewCollectionPercentage=20".into(),"-XX:G1ReservePercent=20".into(),"-XX:G1HeapRegionSize=32M".into()];
     if let Some(jvm)=profile.get("jvm_args").and_then(Value::as_array){for v in jvm.iter().filter_map(Value::as_str){jvm_args.push(substitute(v.to_string(),&game_dir,&assets_dir,&asset_id,&natives_dir,&instance,&mc_version,&username,&uuid,&access_token,user_type));}}
@@ -261,7 +267,7 @@ async fn launch_instance(app: tauri::AppHandle, instance: String) -> Result<Stri
     else if let Some(legacy)=meta.get("minecraftArguments").and_then(Value::as_str){args.extend(legacy.split_whitespace().map(|s|substitute(s.into(),&game_dir,&assets_dir,&asset_id,&natives_dir,&instance,&mc_version,&username,&uuid,&access_token,user_type)));}
     if !args.iter().any(|a|a=="--username"){args.extend(["--username".into(),username.clone(),"--uuid".into(),uuid.clone(),"--accessToken".into(),access_token.clone(),"--userType".into(),user_type.into()]);}
     emit_progress(&app,&instance,"starting",&format!("Starting Minecraft {}{}…",mc_version,if loader!="vanilla"{format!(" with {} {}",loader,installed_loader_version)}else{"".into()}));
-    let mut child=Command::new(java_command()).args(&args).current_dir(&game_dir).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|e|format!("Could not start Java: {}",e))?;
+    let mut child=Command::new(java_command()).args(&args).current_dir(&game_dir).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().map_err(|e|format!("Could not start Java: {}",e))?;
     let pid=child.id(); tauri::async_runtime::spawn(async move{let _=child.wait();});
     Ok(format!("Minecraft {} launched for '{}' as {} (PID {})",mc_version,instance,username,pid))
 }
@@ -322,7 +328,15 @@ pub fn run() {
             runtime_info,
             launcher_data_dir,
             open_instance_folder,
-            list_java_runtimes
+            list_java_runtimes,
+            management::list_instances,
+            management::create_instance,
+            management::snapshot_instance,
+            management::delete_instance,
+            management::list_resource_packs,
+            management::import_resource_pack,
+            management::remove_resource_pack,
+            management::analyze_crash
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application")
