@@ -49,13 +49,15 @@ async fn launch_instance(app: tauri::AppHandle, instance: String) -> Result<Stri
         None => ("Steve".to_string(), offline_uuid("Steve"), "0".to_string(), "legacy".to_string()),
     };
 
-    let main_class=meta.get("mainClass").and_then(Value::as_str).ok_or("Minecraft main class missing")?; let separator=if cfg!(target_os="windows"){";"}else{":"}; let mut args=vec!["-Xmx4G".into(),format!("-Djava.library.path={}",natives_dir.to_string_lossy()),"-cp".into(),classpath.join(separator)];
+    let main_class=meta.get("mainClass").and_then(Value::as_str).ok_or("Minecraft main class missing")?; let separator=if cfg!(target_os="windows"){";"}else{":"}; let classpath_value=classpath.join(separator); let mut args:Vec<String>=vec!["-Xmx4G".into(),format!("-Djava.library.path={}",natives_dir.to_string_lossy())];
     if let Some(acc) = &account { if acc.kind == "elyby" {
         let injector = ensure_authlib_injector(&client, &root).await?;
         args.push(format!("-javaagent:{}=ely.by", injector.to_string_lossy()));
     }}
+    if let Some(jvm)=meta.get("arguments").and_then(|a|a.get("jvm")){args.extend(collect_args(jvm,&game_dir,&assets_dir,asset_id,&natives_dir,&instance,&username,&uuid,&access_token,&user_type).into_iter().map(|arg|arg.replace("${classpath}",&classpath_value)));}
+    if !args.iter().any(|a|a == "-cp") { args.extend(["-cp".into(),classpath_value.clone()]); }
     args.push(main_class.into());
-    if let Some(jvm)=meta.get("arguments").and_then(|a|a.get("jvm")){args.extend(collect_args(jvm,&game_dir,&assets_dir,asset_id,&natives_dir,&instance,&username,&uuid,&access_token,&user_type));} if let Some(game)=meta.get("arguments").and_then(|a|a.get("game")){args.extend(collect_args(game,&game_dir,&assets_dir,asset_id,&natives_dir,&instance,&username,&uuid,&access_token,&user_type));} else if let Some(legacy)=meta.get("minecraftArguments").and_then(Value::as_str){args.extend(legacy.split_whitespace().map(|s|substitute(s.into(),&game_dir,&assets_dir,asset_id,&natives_dir,&instance,&username,&uuid,&access_token,&user_type)));}
+    if let Some(game)=meta.get("arguments").and_then(|a|a.get("game")){args.extend(collect_args(game,&game_dir,&assets_dir,asset_id,&natives_dir,&instance,&username,&uuid,&access_token,&user_type));} else if let Some(legacy)=meta.get("minecraftArguments").and_then(Value::as_str){args.extend(legacy.split_whitespace().map(|s|substitute(s.into(),&game_dir,&assets_dir,asset_id,&natives_dir,&instance,&username,&uuid,&access_token,&user_type)));}
     if !args.iter().any(|a|a=="--username"){ args.extend(["--username".into(),username.clone(),"--uuid".into(),uuid,"--accessToken".into(),access_token,"--userType".into(),user_type,"--version".into(),VERSION.into(),"--versionType".into(),"release".into(),"--gameDir".into(),game_dir.to_string_lossy().to_string(),"--assetsDir".into(),assets_dir.to_string_lossy().to_string(),"--assetIndex".into(),asset_id.into()]); }
     let mut child=Command::new("java").args(&args).current_dir(&game_dir).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|e|format!("Could not start Java. Install Java 21 or select a Java 21 runtime in Settings. ({})",e))?; let pid=child.id(); tauri::async_runtime::spawn(async move{let _=child.wait();}); Ok(format!("Minecraft {} launched for '{}' as {} (PID {})",VERSION,instance,username,pid))
 }
