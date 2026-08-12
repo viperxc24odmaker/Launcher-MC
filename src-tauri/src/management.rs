@@ -71,6 +71,13 @@ pub fn snapshot_instance(app: tauri::AppHandle, name: String) -> Result<String, 
 fn chrono_free_timestamp() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() }
 
 #[tauri::command]
+pub fn delete_instance(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    let instance = root(&app)?.join(safe(&name));
+    if !instance.exists() { return Err("Instance does not exist".into()); }
+    fs::remove_dir_all(&instance).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn analyze_crash(log: String) -> Result<String, String> {
     let lower = log.to_lowercase();
     let diagnosis = if lower.contains("outofmemoryerror") || lower.contains("java heap space") { "Java ran out of heap memory. Increase the instance RAM or remove heavy mods." }
