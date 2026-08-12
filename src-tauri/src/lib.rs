@@ -1,6 +1,5 @@
 use serde_json::Value;
-use sha1::{Digest as Sha1Digest, Sha1};
-use sha2::{Digest as Sha2Digest, Sha256};
+use sha1::{Digest, Sha1};
 use std::{fs, path::{Path, PathBuf}, process::{Command, Stdio}};
 use tauri::Manager;
 
@@ -9,18 +8,14 @@ const VERSION_MANIFEST: &str = "https://piston-meta.mojang.com/mc/game/version_m
 
 fn safe_name(value: &str) -> String { value.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect() }
 fn sha1(bytes: &[u8]) -> String { let mut h = Sha1::new(); h.update(bytes); format!("{:x}", h.finalize()) }
-fn offline_uuid(username: &str) -> String { let mut h = Sha2::new(); h.update(username.as_bytes()); let hex = format!("{:x}", h.finalize()); format!("{}-{}-{}-{}-{}", &hex[0..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..32]) }
+fn offline_uuid(username: &str) -> String { let mut h = Sha1::new(); h.update(username.as_bytes()); let hex = format!("{:x}", h.finalize()); format!("{}-{}-{}-{}-{}", &hex[0..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..32]) }
 
-async fn fetch_json(client: &reqwest::Client, url: &str) -> Result<Value, String> {
-    client.get(url).send().await.map_err(|e| e.to_string())?.error_for_status().map_err(|e| e.to_string())?.json::<Value>().await.map_err(|e| e.to_string())
-}
+async fn fetch_json(client: &reqwest::Client, url: &str) -> Result<Value, String> { client.get(url).send().await.map_err(|e| e.to_string())?.error_for_status().map_err(|e| e.to_string())?.json::<Value>().await.map_err(|e| e.to_string()) }
 
 async fn download_file(client: &reqwest::Client, url: &str, path: &Path, expected_hash: Option<&str>) -> Result<(), String> {
     if path.exists() {
-        if let Some(hash) = expected_hash {
-            let existing = fs::read(path).map_err(|e| e.to_string())?;
-            if sha1(&existing) == hash { return Ok(()); }
-        } else { return Ok(()); }
+        if let Some(hash) = expected_hash { let existing = fs::read(path).map_err(|e| e.to_string())?; if sha1(&existing) == hash { return Ok(()); } }
+        else { return Ok(()); }
     }
     if let Some(parent) = path.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
     let bytes = client.get(url).send().await.map_err(|e| e.to_string())?.error_for_status().map_err(|e| e.to_string())?.bytes().await.map_err(|e| e.to_string())?;
@@ -169,18 +164,10 @@ async fn launch_instance(app: tauri::AppHandle, instance: String) -> Result<Stri
 }
 
 #[tauri::command]
-fn runtime_info() -> Result<String, String> {
-    match Command::new("java").arg("-version").output() { Ok(output) => Ok(String::from_utf8_lossy(&output.stderr).lines().next().unwrap_or("Java detected").to_string()), Err(_) => Err("Java was not found on PATH".into()) }
-}
+fn runtime_info() -> Result<String, String> { match Command::new("java").arg("-version").output() { Ok(output) => Ok(String::from_utf8_lossy(&output.stderr).lines().next().unwrap_or("Java detected").to_string()), Err(_) => Err("Java was not found on PATH".into()) } }
 
 #[tauri::command]
-fn launcher_data_dir(app: tauri::AppHandle) -> Result<String, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Ok(dir.to_string_lossy().to_string())
-}
+fn launcher_data_dir(app: tauri::AppHandle) -> Result<String, String> { let dir = app.path().app_data_dir().map_err(|e| e.to_string())?; fs::create_dir_all(&dir).map_err(|e| e.to_string())?; Ok(dir.to_string_lossy().to_string()) }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    tauri::Builder::default().invoke_handler(tauri::generate_handler![launch_instance, runtime_info, launcher_data_dir]).run(tauri::generate_context!()).expect("error while running BlockPilot");
-}
+pub fn run() { tauri::Builder::default().invoke_handler(tauri::generate_handler![launch_instance, runtime_info, launcher_data_dir]).run(tauri::generate_context!()).expect("error while running BlockPilot"); }
