@@ -124,7 +124,7 @@
   }
 
   // ---- accounts (offline + ely.by) ----
-  type Account = { id:string; kind:'offline'|'elyby'; username:string; uuid:string; access_token?:string|null; skin_path?:string|null; cape_id?:string|null; active:boolean };
+  type Account = { id:string; kind:'offline'|'elyby'|'microsoft'; username:string; uuid:string; access_token?:string|null; skin_path?:string|null; cape_id?:string|null; active:boolean };
   let accountsList: Account[] = [];
   let accountsLoaded = false;
   let authMode: 'offline'|'elyby'|'microsoft' = 'offline';
@@ -424,7 +424,7 @@
               <label class="search inner wide"><input placeholder="Choose a username…" bind:value={offlineUsername} onkeydown={(e)=>e.key==='Enter' && createOfflineAccount()}/></label>
               <button class="row-action solid" onclick={createOfflineAccount} disabled={authBusy}>{authBusy?'ADDING…':'ADD PROFILE'}</button>
             </div>
-          {:else}
+          {:else if authMode==='elyby'}
             <div class="auth-form">
               <p class="auth-hint"><KeyRound size={12}/> Signs in via ely.by's Yggdrasil endpoint. Your real skin and cape render in-game through authlib-injector.</p>
               <label class="search inner wide"><input placeholder="ely.by username or email…" bind:value={elybyUsername}/></label>
