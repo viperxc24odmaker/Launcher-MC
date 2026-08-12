@@ -27,7 +27,7 @@
     ['Snapshots & rollback','Create a safe restore point before risky changes.',RotateCcw],
     ['Crash auto-analysis','Turn ugly logs into a readable diagnosis and next step.',AlertTriangle],
     ['Secure account vault','Encrypted local profiles with fast account switching.',ShieldCheck]
-  ];
+  ] as const;
 
   // ---- launch ----
   async function play(){

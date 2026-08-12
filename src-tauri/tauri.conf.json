@@ -27,7 +27,6 @@
     "windows": {
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",
-      "signingIdentity": null,
       "timestampUrl": ""
     }
   }
